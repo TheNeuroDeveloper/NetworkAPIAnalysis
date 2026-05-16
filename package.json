@@ -1,0 +1,18 @@
+{
+  "name": "network-tab-api-breakdown",
+  "version": "0.1.0",
+  "description": "Capture and summarize API traffic from a single browser tab.",
+  "type": "module",
+  "bin": {
+    "ntab": "./src/cli.js"
+  },
+  "scripts": {
+    "capture": "node ./src/cli.js capture",
+    "summarize": "node ./src/cli.js summarize",
+    "lint": "node --check ./src/cli.js && node --check ./src/cdp.js && node --check ./src/report.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}

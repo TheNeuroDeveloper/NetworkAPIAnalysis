@@ -6,7 +6,7 @@ import os from "node:os";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { CdpClient, getBrowserWebSocketUrl } from "./cdp.js";
-import { readCapture, writeReport } from "./report.js";
+import { readCapture, writeApiReport, writeReport } from "./report.js";
 
 const DEFAULT_BODY_LIMIT = 200_000;
 
@@ -40,6 +40,7 @@ async function capture(args) {
   await fs.mkdir(outDir, { recursive: true });
   const captureFile = path.join(outDir, "capture.jsonl");
   const reportFile = path.join(outDir, "report.md");
+  const apiReportFile = path.join(outDir, "api-report.md");
   const metaFile = path.join(outDir, "meta.json");
 
   const chrome = launchChrome({
@@ -107,7 +108,8 @@ async function capture(args) {
       exclude: toArray(args.exclude),
       bodyLimit,
       captureFile,
-      reportFile
+      reportFile,
+      apiReportFile
     }, null, 2), "utf8");
 
     console.log(`Capturing ${args.url}`);
@@ -132,9 +134,11 @@ async function capture(args) {
     }
     const captured = await readCapture(captureFile).catch(() => []);
     await writeReport(reportFile, captured);
+    await writeApiReport(apiReportFile, captured);
     console.log(`Wrote ${captured.length} requests`);
     console.log(`Capture: ${captureFile}`);
     console.log(`Report: ${reportFile}`);
+    console.log(`API report: ${apiReportFile}`);
   }
 }
 
@@ -142,9 +146,12 @@ async function summarize(args) {
   if (!args.input) throw new Error("Missing --input");
   const input = path.resolve(args.input);
   const out = path.resolve(args.out ?? path.join(path.dirname(input), "report.md"));
+  const apiOut = path.resolve(args["api-out"] ?? path.join(path.dirname(input), "api-report.md"));
   const records = await readCapture(input);
   await writeReport(out, records);
+  await writeApiReport(apiOut, records);
   console.log(`Wrote ${out}`);
+  console.log(`Wrote ${apiOut}`);
 }
 
 function handleNetworkEvent(message, records, options) {

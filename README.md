@@ -6,6 +6,7 @@ It launches Chrome with remote debugging enabled, opens the URL you provide, lis
 
 - `capture.jsonl`: one JSON object per request
 - `report.md`: a grouped API breakdown by method/path/status/content type
+- `api-report.md`: a focused API-only report that filters static/media noise and decodes GraphQL/query/body payloads
 
 ## Quick Start
 
@@ -44,15 +45,18 @@ npm run capture -- \
 npm run summarize -- --input ./captures/2026-05-16T10-20-00-000Z/capture.jsonl
 ```
 
+This writes both `report.md` and `api-report.md` next to the capture unless you pass `--out` or `--api-out`.
+
 ## What This Is Good For
 
 - Mapping which endpoints a webapp calls during specific workflows.
 - Finding request headers, payload shapes, query params, response shapes, status codes, and timing.
+- Separating real app API calls from scripts, images, fonts, videos, preflights, and other browser noise.
 - Building a first-pass API inventory before writing deeper probes or clients.
 
 ## Important Notes
 
 - Only inspect traffic you are authorized to inspect.
-- Secrets can appear in captures. Treat output files as sensitive.
+- Secrets, cookies, and auth headers can appear in captures and reports. Treat output files as sensitive.
 - Chrome may refuse response bodies for some responses, redirects, cached resources, preflights, or very large/streamed payloads.
 - This is not a TLS proxy. It observes the browser tab via DevTools, which is often enough for modern webapp API discovery.

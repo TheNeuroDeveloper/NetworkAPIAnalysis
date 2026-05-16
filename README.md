@@ -34,7 +34,7 @@ npm run capture -- \
 - `--exclude`: host or regex filter. Can be repeated.
 - `--out`: output directory.
 - `--body-limit`: max response body characters saved per request.
-- `--chrome`: explicit Chrome/Chromium executable path.
+- `--chrome`: explicit Brave/Chrome/Chromium executable path. By default the tool prefers Brave on macOS, then Chrome/Chromium.
 - `--keep-profile`: keep the temporary Chrome profile after capture.
 - `--port`: remote debugging port, default `9222`.
 

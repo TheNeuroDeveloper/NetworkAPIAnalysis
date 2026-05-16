@@ -222,7 +222,7 @@ async function captureBody(requestId, record, options) {
 }
 
 function launchChrome({ executable, port, profileDir, url }) {
-  const chromePath = executable ?? findChrome();
+  const chromePath = executable ?? findChromiumBrowser();
   const args = [
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${profileDir}`,
@@ -238,8 +238,9 @@ function launchChrome({ executable, port, profileDir, url }) {
   return child;
 }
 
-function findChrome() {
+function findChromiumBrowser() {
   const candidates = [
+    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
     "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary"
@@ -249,7 +250,7 @@ function findChrome() {
       return candidate;
     }
   }
-  return "google-chrome";
+  return "brave-browser";
 }
 
 function parseArgs(argv) {

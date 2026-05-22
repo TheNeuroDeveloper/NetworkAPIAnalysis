@@ -17,9 +17,10 @@ import {
   writeWebSocketReport,
   writeWebSocketSnippet
 } from "./websocket.js";
-import { renderProxyRedirectScript, startFarmZeroCostProxy } from "./ws-proxy.js";
+import { renderProxyRedirectScript, startFeudalWarsProxy } from "./ws-proxy.js";
 
 const DEFAULT_BODY_LIMIT = 200_000;
+const SUPPORTED_WS_RULES = new Set(["farm-zero-cost", "free-buildings", "free-ruleset"]);
 
 main().catch((error) => {
   console.error(error.stack || error.message);
@@ -403,7 +404,7 @@ async function webSocketProxyMutate(args) {
   if (!args.url) throw new Error("Missing --url for the game page");
 
   const rule = args.rule ?? "farm-zero-cost";
-  if (rule !== "farm-zero-cost") throw new Error(`Unsupported --rule ${rule}`);
+  if (!SUPPORTED_WS_RULES.has(rule)) throw new Error(`Unsupported --rule ${rule}`);
 
   const target = args.target ?? "all";
   const port = Number(args.port ?? 9222);
@@ -419,7 +420,7 @@ async function webSocketProxyMutate(args) {
   const captureState = createWebSocketCapture({ target, pageUrl: args.url });
 
   await fs.mkdir(outDir, { recursive: true });
-  const proxy = await startFarmZeroCostProxy({ port: proxyPort });
+  const proxy = await startFeudalWarsProxy({ port: proxyPort, rule });
 
   const chrome = launchChrome({
     executable: args.chrome,
@@ -692,7 +693,12 @@ function help() {
   npm run ws:snippet -- --out ./feudalwars-ws-snippet.js
   npm run ws:capture -- --url https://game.example.test --target wss://eu1.feudalwars.net --duration 60
   npm run ws:mutate -- --url https://game.example.test --target all --rule farm-zero-cost --duration 60
-  npm run ws:proxy-mutate -- --url https://game.example.test --target all --rule farm-zero-cost --duration 60
+  npm run ws:proxy-mutate -- --url https://game.example.test --target all --rule free-buildings --duration 60
   npm run ws:analyze -- --input ./feudalwars-ws-capture.json
+
+Proxy mutation rules:
+  farm-zero-cost  Zero only farm.cost
+  free-buildings  Zero building costs, build times, and pop values
+  free-ruleset    Zero building and unit costs, build times, and pop values
 `);
 }

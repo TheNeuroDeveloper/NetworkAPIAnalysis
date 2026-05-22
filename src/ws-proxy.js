@@ -4,7 +4,17 @@ import zlib from "node:zlib";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
-export function startFarmZeroCostProxy({ port = 8787, upstreamDefaultHost = "eu1.feudalwars.net" } = {}) {
+const SUPPORTED_RULES = new Set(["farm-zero-cost", "free-buildings", "free-ruleset"]);
+
+export function startFeudalWarsProxy({
+  port = 8787,
+  upstreamDefaultHost = "eu1.feudalwars.net",
+  rule = "farm-zero-cost"
+} = {}) {
+  if (!SUPPORTED_RULES.has(rule)) {
+    throw new Error(`Unsupported proxy mutation rule ${rule}`);
+  }
+
   const logs = [];
   const server = http.createServer();
 
@@ -67,7 +77,7 @@ export function startFarmZeroCostProxy({ port = 8787, upstreamDefaultHost = "eu1
     });
     upstream.addEventListener("message", (event) => {
       const original = Buffer.from(event.data);
-      const mutation = mutateFarmZeroCost(original);
+      const mutation = mutateFeudalWarsPayload(original, rule);
       const payload = mutation.payload;
       if (mutation.changed) {
         logs.push({
@@ -75,8 +85,9 @@ export function startFarmZeroCostProxy({ port = 8787, upstreamDefaultHost = "eu1
           clientId,
           upstreamUrl,
           direction: "in",
-          command: "match_ruleset",
-          mutation: "farm-zero-cost",
+          command: mutation.command,
+          mutation: rule,
+          summary: mutation.summary,
           before: mutation.before,
           after: mutation.after
         });
@@ -112,6 +123,10 @@ export function startFarmZeroCostProxy({ port = 8787, upstreamDefaultHost = "eu1
       });
     });
   });
+}
+
+export function startFarmZeroCostProxy(options = {}) {
+  return startFeudalWarsProxy({ ...options, rule: "farm-zero-cost" });
 }
 
 export function renderProxyRedirectScript({ port = 8787, target = "all" } = {}) {
@@ -252,7 +267,7 @@ function encodeFrame({ opcode = 2, payload = Buffer.alloc(0) }) {
   return Buffer.concat([header, body]);
 }
 
-function mutateFarmZeroCost(payload) {
+function mutateFeudalWarsPayload(payload, rule) {
   const decoded = decodeZlibJson(payload);
   if (!decoded || decoded.n !== "match_ruleset" || !Array.isArray(decoded.params)) {
     return { changed: false, payload };
@@ -261,19 +276,110 @@ function mutateFarmZeroCost(payload) {
   const ruleset = parseMaybeJson(decoded.params[0]);
   if (!ruleset || !Array.isArray(ruleset.buildings)) return { changed: false, payload };
 
-  const farm = ruleset.buildings.find((building) => building?.key === "farm");
-  if (!farm) return { changed: false, payload };
+  const mutation = mutateRuleset(ruleset, rule);
+  if (!mutation.changed) return { changed: false, payload };
 
-  const before = JSON.parse(JSON.stringify(farm.cost ?? null));
-  farm.cost = { gold: 0, food: 0, lumber: 0, energy: 0 };
   decoded.params[0] = JSON.stringify(ruleset);
 
   return {
     changed: true,
     payload: zlib.deflateSync(Buffer.from(JSON.stringify(decoded), "utf8")),
-    before,
-    after: farm.cost
+    command: decoded.n,
+    ...mutation
   };
+}
+
+function mutateRuleset(ruleset, rule) {
+  if (rule === "farm-zero-cost") {
+    const farm = ruleset.buildings.find((building) => building?.key === "farm");
+    if (!farm) return { changed: false };
+
+    const before = snapshotEntity(farm, ["cost"]);
+    zeroCost(farm);
+    const after = snapshotEntity(farm, ["cost"]);
+    return {
+      changed: JSON.stringify(before) !== JSON.stringify(after),
+      summary: { buildingsChanged: 1, unitsChanged: 0, fields: ["farm.cost"] },
+      before,
+      after
+    };
+  }
+
+  if (rule === "free-buildings") {
+    const before = ruleset.buildings.map((building) => snapshotEntity(building, ["key", "cost", "build_time_ms", "pop"]));
+    for (const building of ruleset.buildings) {
+      zeroCost(building);
+      zeroNumberField(building, "build_time_ms");
+      zeroNumberField(building, "pop");
+    }
+    const after = ruleset.buildings.map((building) => snapshotEntity(building, ["key", "cost", "build_time_ms", "pop"]));
+    return {
+      changed: JSON.stringify(before) !== JSON.stringify(after),
+      summary: {
+        buildingsChanged: countChanged(before, after),
+        unitsChanged: 0,
+        fields: ["buildings[].cost", "buildings[].build_time_ms", "buildings[].pop"]
+      },
+      before,
+      after
+    };
+  }
+
+  if (rule === "free-ruleset") {
+    const units = Array.isArray(ruleset.units) ? ruleset.units : [];
+    const before = {
+      buildings: ruleset.buildings.map((building) => snapshotEntity(building, ["key", "cost", "build_time_ms", "pop"])),
+      units: units.map((unit) => snapshotEntity(unit, ["key", "cost", "build_time_ms", "pop"]))
+    };
+    for (const building of ruleset.buildings) {
+      zeroCost(building);
+      zeroNumberField(building, "build_time_ms");
+      zeroNumberField(building, "pop");
+    }
+    for (const unit of units) {
+      zeroCost(unit);
+      zeroNumberField(unit, "build_time_ms");
+      zeroNumberField(unit, "pop");
+    }
+    const after = {
+      buildings: ruleset.buildings.map((building) => snapshotEntity(building, ["key", "cost", "build_time_ms", "pop"])),
+      units: units.map((unit) => snapshotEntity(unit, ["key", "cost", "build_time_ms", "pop"]))
+    };
+    return {
+      changed: JSON.stringify(before) !== JSON.stringify(after),
+      summary: {
+        buildingsChanged: countChanged(before.buildings, after.buildings),
+        unitsChanged: countChanged(before.units, after.units),
+        fields: ["buildings[].cost", "buildings[].build_time_ms", "buildings[].pop", "units[].cost", "units[].build_time_ms", "units[].pop"]
+      },
+      before,
+      after
+    };
+  }
+
+  return { changed: false };
+}
+
+function zeroCost(entity) {
+  if (!entity || typeof entity !== "object") return;
+  entity.cost = { gold: 0, food: 0, lumber: 0, energy: 0 };
+}
+
+function zeroNumberField(entity, field) {
+  if (!entity || typeof entity !== "object") return;
+  if (typeof entity[field] === "number") entity[field] = 0;
+}
+
+function snapshotEntity(entity, fields) {
+  const snapshot = {};
+  for (const field of fields) {
+    if (Object.hasOwn(entity, field)) snapshot[field] = entity[field];
+  }
+  return JSON.parse(JSON.stringify(snapshot));
+}
+
+function countChanged(before, after) {
+  return before.reduce((count, item, index) => count + (JSON.stringify(item) === JSON.stringify(after[index]) ? 0 : 1), 0);
 }
 
 function decodeZlibJson(payload) {

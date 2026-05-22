@@ -11,6 +11,7 @@
     "summarize": "node ./src/cli.js summarize",
     "ws:snippet": "node ./src/cli.js ws-snippet",
     "ws:capture": "node ./src/cli.js ws-capture",
+    "ws:mutate": "node ./src/cli.js ws-mutate",
     "ws:analyze": "node ./src/cli.js ws-analyze",
     "lint": "node --check ./src/cli.js && node --check ./src/cdp.js && node --check ./src/report.js && node --check ./src/websocket.js"
   },

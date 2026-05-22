@@ -182,6 +182,196 @@ export async function writeWebSocketSnippet(file, target = DEFAULT_TARGET) {
   await fs.writeFile(file, renderWebSocketSnippet(target), "utf8");
 }
 
+export function renderFarmZeroCostMutator({ target = "all" } = {}) {
+  return `(() => {
+  const target = ${JSON.stringify(target)};
+  const NativeWebSocket = window.WebSocket;
+  const logs = [];
+  let nextSocketId = 1;
+
+  function now() {
+    return new Date().toISOString();
+  }
+
+  function shouldMutate(url) {
+    return target === "all" || String(url).startsWith(target);
+  }
+
+  async function bytesFromPayload(payload) {
+    if (payload instanceof ArrayBuffer) return new Uint8Array(payload);
+    if (ArrayBuffer.isView(payload)) return new Uint8Array(payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength));
+    if (payload instanceof Blob) return new Uint8Array(await payload.arrayBuffer());
+    if (typeof payload === "string") return new TextEncoder().encode(payload);
+    return undefined;
+  }
+
+  async function inflate(bytes) {
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate"));
+    const buffer = await new Response(stream).arrayBuffer();
+    return new TextDecoder().decode(buffer);
+  }
+
+  async function deflate(text) {
+    const stream = new Blob([new TextEncoder().encode(text)]).stream().pipeThrough(new CompressionStream("deflate"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+
+  function payloadLike(bytes, original) {
+    const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    if (original instanceof Blob) return new Blob([buffer], { type: original.type });
+    if (original instanceof ArrayBuffer) return buffer;
+    if (ArrayBuffer.isView(original)) return new original.constructor(buffer);
+    return buffer;
+  }
+
+  function parseMaybeJson(value) {
+    if (typeof value !== "string") return value;
+    const trimmed = value.trim();
+    if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return value;
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return value;
+    }
+  }
+
+  function zeroFarmCost(message, direction, socketMeta) {
+    if (!message || message.n !== "match_ruleset" || !Array.isArray(message.params)) return { changed: false, message };
+    const ruleset = parseMaybeJson(message.params[0]);
+    if (!ruleset || typeof ruleset !== "object" || !Array.isArray(ruleset.buildings)) return { changed: false, message };
+
+    const farm = ruleset.buildings.find((building) => building && building.key === "farm");
+    if (!farm) return { changed: false, message };
+
+    const before = JSON.parse(JSON.stringify(farm.cost ?? null));
+    farm.cost = { gold: 0, food: 0, lumber: 0, energy: 0 };
+    message.params[0] = JSON.stringify(ruleset);
+
+    logs.push({
+      timestamp: now(),
+      socketId: socketMeta.id,
+      url: socketMeta.url,
+      direction,
+      command: message.n,
+      mutation: "farm-zero-cost",
+      before,
+      after: farm.cost
+    });
+
+    console.log("[ws-mutate] farm cost forced to zero", { before, after: farm.cost });
+    return { changed: true, message };
+  }
+
+  async function mutatePayload(payload, direction, socketMeta) {
+    try {
+      const bytes = await bytesFromPayload(payload);
+      if (!bytes) return payload;
+      const text = bytes[0] === 0x78 ? await inflate(bytes) : new TextDecoder().decode(bytes);
+      const message = JSON.parse(text);
+      const result = zeroFarmCost(message, direction, socketMeta);
+      if (!result.changed) return payload;
+      const encoded = await deflate(JSON.stringify(result.message));
+      return payloadLike(encoded, payload);
+    } catch (error) {
+      logs.push({
+        timestamp: now(),
+        socketId: socketMeta.id,
+        url: socketMeta.url,
+        direction,
+        mutation: "farm-zero-cost",
+        error: error.message
+      });
+      return payload;
+    }
+  }
+
+  function cloneMessageEvent(event, data) {
+    return new MessageEvent("message", {
+      data,
+      origin: event.origin,
+      lastEventId: event.lastEventId,
+      source: event.source,
+      ports: event.ports
+    });
+  }
+
+  function CapturingWebSocket(url, protocols) {
+    const socket = protocols === undefined
+      ? new NativeWebSocket(url)
+      : new NativeWebSocket(url, protocols);
+
+    if (!shouldMutate(url)) return socket;
+
+    const socketMeta = { id: nextSocketId++, url: String(url), createdAt: now() };
+    logs.push({ timestamp: now(), socketId: socketMeta.id, url: socketMeta.url, event: "socket-created" });
+
+    const nativeAddEventListener = socket.addEventListener.bind(socket);
+    socket.addEventListener = (type, listener, options) => {
+      if (type !== "message" || typeof listener !== "function") {
+        return nativeAddEventListener(type, listener, options);
+      }
+      return nativeAddEventListener(type, async (event) => {
+        const data = await mutatePayload(event.data, "in", socketMeta);
+        listener.call(socket, cloneMessageEvent(event, data));
+      }, options);
+    };
+
+    let onmessageHandler = null;
+    Object.defineProperty(socket, "onmessage", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        return onmessageHandler;
+      },
+      set(handler) {
+        onmessageHandler = typeof handler === "function" ? handler : null;
+      }
+    });
+
+    nativeAddEventListener("message", async (event) => {
+      if (!onmessageHandler) return;
+      const data = await mutatePayload(event.data, "in", socketMeta);
+      onmessageHandler.call(socket, cloneMessageEvent(event, data));
+    });
+
+    const nativeSend = socket.send.bind(socket);
+    socket.send = async (payload) => {
+      const data = await mutatePayload(payload, "out", socketMeta);
+      return nativeSend(data);
+    };
+
+    return socket;
+  }
+
+  CapturingWebSocket.CONNECTING = NativeWebSocket.CONNECTING;
+  CapturingWebSocket.OPEN = NativeWebSocket.OPEN;
+  CapturingWebSocket.CLOSING = NativeWebSocket.CLOSING;
+  CapturingWebSocket.CLOSED = NativeWebSocket.CLOSED;
+  CapturingWebSocket.prototype = NativeWebSocket.prototype;
+  Object.defineProperty(CapturingWebSocket, "name", { value: "WebSocket" });
+
+  window.WebSocket = CapturingWebSocket;
+  window.__wsMutator = {
+    target,
+    logs,
+    snapshot() {
+      return {
+        target,
+        exportedAt: now(),
+        location: window.location.href,
+        logs: logs.slice()
+      };
+    },
+    restore() {
+      window.WebSocket = NativeWebSocket;
+      return "Native WebSocket restored. Existing sockets are not closed.";
+    }
+  };
+
+  console.log("[ws-mutate] Installed farm-zero-cost mutator for", target);
+})();`;
+}
+
 export async function readWebSocketCapture(file) {
   const text = await fs.readFile(file, "utf8");
   const parsed = JSON.parse(text);

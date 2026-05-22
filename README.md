@@ -95,6 +95,26 @@ npm run ws:capture -- \
   --duration 60
 ```
 
+## WebSocket Mutation Test
+
+For an authorized test room, `ws:mutate` can inject a narrow pre-load WebSocket mutator and record the run. The first supported rule changes inbound `match_ruleset` data before the game client sees it, setting the `farm` building cost to zero:
+
+```bash
+npm run ws:mutate -- \
+  --url https://next.feudalwars.net \
+  --target all \
+  --rule farm-zero-cost \
+  --duration 0
+```
+
+This writes:
+
+- `websocket-capture.json`: wire traffic observed by DevTools
+- `websocket-report.md`: decoded WebSocket command report
+- `websocket-mutations.json`: in-page mutation log showing before/after values
+
+This verifies whether the client reacts to a modified ruleset. It does not by itself prove the server accepts zero-cost farms; follow-up tests should check whether placement/training commands are accepted or corrected server-side.
+
 ## What This Is Good For
 
 - Mapping which endpoints a webapp calls during specific workflows.

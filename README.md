@@ -86,6 +86,15 @@ npm run ws:capture -- \
 
 Use `--duration 0` to record until you press `Ctrl+C`. The command writes `websocket-capture.json` and `websocket-report.md` into `./captures/<timestamp>/`.
 
+To capture every WebSocket opened by the page, use `--target all`:
+
+```bash
+npm run ws:capture -- \
+  --url https://game.example.test \
+  --target all \
+  --duration 60
+```
+
 ## What This Is Good For
 
 - Mapping which endpoints a webapp calls during specific workflows.

@@ -13,7 +13,7 @@ export function renderWebSocketSnippet(target = DEFAULT_TARGET) {
   const startedAt = new Date().toISOString();
 
   function shouldCapture(url) {
-    return String(url).startsWith(target);
+    return target === "all" || String(url).startsWith(target);
   }
 
   function now() {
@@ -212,7 +212,7 @@ export function handleCdpWebSocketEvent(capture, message) {
   if (!params?.requestId) return;
 
   if (method === "Network.webSocketCreated") {
-    if (!String(params.url).startsWith(capture.target)) return;
+    if (!shouldCaptureSocket(capture.target, params.url)) return;
     capture.sockets.push({
       id: params.requestId,
       requestId: params.requestId,
@@ -344,13 +344,26 @@ export function renderWebSocketReport(capture) {
 function groupFrames(frames) {
   const groups = new Map();
   for (const frame of frames) {
-    const key = `${frame.direction} ${frameCommand(frame)}`;
+    const key = `${frame.direction} ${socketLabel(frame.url)} ${frameCommand(frame)}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(frame);
   }
   return [...groups.entries()]
     .map(([key, groupedFrames]) => ({ key, frames: groupedFrames }))
     .sort((a, b) => b.frames.length - a.frames.length || a.key.localeCompare(b.key));
+}
+
+function shouldCaptureSocket(target, url) {
+  return target === "all" || String(url).startsWith(target);
+}
+
+function socketLabel(url) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.host}${parsed.pathname}`;
+  } catch {
+    return "unknown-socket";
+  }
 }
 
 function cdpMessageFrame(capture, socket, direction, frame) {

@@ -12,8 +12,9 @@
     "ws:snippet": "node ./src/cli.js ws-snippet",
     "ws:capture": "node ./src/cli.js ws-capture",
     "ws:mutate": "node ./src/cli.js ws-mutate",
+    "ws:proxy-mutate": "node ./src/cli.js ws-proxy-mutate",
     "ws:analyze": "node ./src/cli.js ws-analyze",
-    "lint": "node --check ./src/cli.js && node --check ./src/cdp.js && node --check ./src/report.js && node --check ./src/websocket.js"
+    "lint": "node --check ./src/cli.js && node --check ./src/cdp.js && node --check ./src/report.js && node --check ./src/websocket.js && node --check ./src/ws-proxy.js"
   },
   "engines": {
     "node": ">=22"

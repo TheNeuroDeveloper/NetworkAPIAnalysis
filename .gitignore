@@ -3,3 +3,4 @@ captures/
 *-ws-capture.json
 websocket-capture.json
 websocket-report.md
+websocket-proxy-log.json

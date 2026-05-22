@@ -115,6 +115,18 @@ This writes:
 
 This verifies whether the client reacts to a modified ruleset. It does not by itself prove the server accepts zero-cost farms; follow-up tests should check whether placement/training commands are accepted or corrected server-side.
 
+If the in-page mutator misses the socket, use the local proxy mutator. It redirects Feudal Wars WebSockets to `ws://127.0.0.1:<proxy-port>`, forwards them to the original `wss://...` upstream, and rewrites inbound `match_ruleset` frames in the middle:
+
+```bash
+npm run ws:proxy-mutate -- \
+  --url https://next.feudalwars.net \
+  --target all \
+  --rule farm-zero-cost \
+  --duration 0
+```
+
+This writes `websocket-proxy-log.json` with proxy-side before/after mutation evidence.
+
 ## What This Is Good For
 
 - Mapping which endpoints a webapp calls during specific workflows.

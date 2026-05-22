@@ -17,6 +17,7 @@ import {
   writeWebSocketReport,
   writeWebSocketSnippet
 } from "./websocket.js";
+import { renderProxyRedirectScript, startFarmZeroCostProxy } from "./ws-proxy.js";
 
 const DEFAULT_BODY_LIMIT = 200_000;
 
@@ -34,6 +35,7 @@ async function main() {
   if (command === "ws-snippet") return webSocketSnippet(args);
   if (command === "ws-capture") return webSocketCapture(args);
   if (command === "ws-mutate") return webSocketMutate(args);
+  if (command === "ws-proxy-mutate") return webSocketProxyMutate(args);
   if (command === "ws-analyze") return webSocketAnalyze(args);
   return help();
 }
@@ -397,6 +399,120 @@ async function webSocketMutate(args) {
   }
 }
 
+async function webSocketProxyMutate(args) {
+  if (!args.url) throw new Error("Missing --url for the game page");
+
+  const rule = args.rule ?? "farm-zero-cost";
+  if (rule !== "farm-zero-cost") throw new Error(`Unsupported --rule ${rule}`);
+
+  const target = args.target ?? "all";
+  const port = Number(args.port ?? 9222);
+  const proxyPort = Number(args["proxy-port"] ?? 8787);
+  const duration = Number(args.duration ?? 60);
+  const outDir = path.resolve(args.out ?? path.join("captures", safeStamp(new Date())));
+  const profileDir = args["profile-dir"]
+    ? path.resolve(args["profile-dir"])
+    : await fs.mkdtemp(path.join(os.tmpdir(), "network-tab-profile-"));
+  const captureFile = path.join(outDir, "websocket-capture.json");
+  const reportFile = path.join(outDir, "websocket-report.md");
+  const proxyLogFile = path.join(outDir, "websocket-proxy-log.json");
+  const captureState = createWebSocketCapture({ target, pageUrl: args.url });
+
+  await fs.mkdir(outDir, { recursive: true });
+  const proxy = await startFarmZeroCostProxy({ port: proxyPort });
+
+  const chrome = launchChrome({
+    executable: args.chrome,
+    port,
+    profileDir,
+    url: "about:blank"
+  });
+
+  let client;
+  let targetId;
+  let sessionId;
+  let finalized = false;
+
+  const finalize = async () => {
+    if (finalized) return;
+    finalized = true;
+    await writeWebSocketCapture(captureFile, captureState);
+    await writeWebSocketReport(reportFile, captureState);
+    await fs.writeFile(proxyLogFile, JSON.stringify({
+      exportedAt: new Date().toISOString(),
+      rule,
+      target,
+      proxyPort,
+      logs: proxy.logs
+    }, null, 2), "utf8");
+    console.log(`Wrote ${captureState.frames.length} WebSocket events`);
+    console.log(`Capture: ${captureFile}`);
+    console.log(`Report: ${reportFile}`);
+    console.log(`Proxy log: ${proxyLogFile}`);
+  };
+
+  const cleanup = async () => {
+    if (client && targetId) {
+      await client.send("Target.closeTarget", { targetId }).catch(() => {});
+    }
+    client?.close();
+    await proxy.close();
+    chrome.kill("SIGTERM");
+    if (!args["keep-profile"] && !args["profile-dir"]) {
+      await fs.rm(profileDir, { recursive: true, force: true }).catch(() => {});
+    }
+  };
+
+  process.once("SIGINT", async () => {
+    console.log("\nStopping WebSocket proxy mutation run...");
+    await finalize();
+    await cleanup();
+    process.exit(0);
+  });
+
+  try {
+    const wsUrl = await getBrowserWebSocketUrl(port);
+    client = new CdpClient(wsUrl);
+    await client.connect();
+
+    const targetInfo = await client.send("Target.createTarget", { url: "about:blank" });
+    targetId = targetInfo.targetId;
+    const attached = await client.send("Target.attachToTarget", { targetId, flatten: true });
+    sessionId = attached.sessionId;
+
+    client.onEvent((message) => {
+      if (message.sessionId !== sessionId) return;
+      handleCdpWebSocketEvent(captureState, message);
+    });
+
+    await client.send("Page.enable", {}, sessionId);
+    await client.send("Runtime.enable", {}, sessionId);
+    await client.send("Network.enable", {}, sessionId);
+    await client.send("Network.setCacheDisabled", { cacheDisabled: true }, sessionId);
+    await client.send("Page.addScriptToEvaluateOnNewDocument", {
+      source: renderProxyRedirectScript({ port: proxyPort, target })
+    }, sessionId);
+    await client.send("Page.navigate", { url: args.url }, sessionId);
+
+    console.log(`Proxy-mutating WebSockets from ${args.url}`);
+    console.log(`Target: ${target}`);
+    console.log(`Rule: ${rule}`);
+    console.log(`Proxy: ws://127.0.0.1:${proxyPort}`);
+    console.log(`Output: ${outDir}`);
+    console.log(duration === 0 ? "Press Ctrl+C to stop." : `Running for ${duration} seconds...`);
+
+    if (duration === 0) {
+      await once(process, "never");
+    } else {
+      await new Promise((resolve) => setTimeout(resolve, duration * 1000));
+    }
+
+    await finalize();
+  } finally {
+    await cleanup();
+  }
+}
+
 function handleNetworkEvent(message, records, options) {
   const { method, params } = message;
 
@@ -576,6 +692,7 @@ function help() {
   npm run ws:snippet -- --out ./feudalwars-ws-snippet.js
   npm run ws:capture -- --url https://game.example.test --target wss://eu1.feudalwars.net --duration 60
   npm run ws:mutate -- --url https://game.example.test --target all --rule farm-zero-cost --duration 60
+  npm run ws:proxy-mutate -- --url https://game.example.test --target all --rule farm-zero-cost --duration 60
   npm run ws:analyze -- --input ./feudalwars-ws-capture.json
 `);
 }

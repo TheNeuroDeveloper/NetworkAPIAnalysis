@@ -47,11 +47,40 @@ npm run summarize -- --input ./captures/2026-05-16T10-20-00-000Z/capture.jsonl
 
 This writes both `report.md` and `api-report.md` next to the capture unless you pass `--out` or `--api-out`.
 
+## WebSocket Capture Snippet
+
+For an authorized game/webapp pentest where you need to inspect a WebSocket before it is opened, generate a pasteable browser-console hook:
+
+```bash
+npm run ws:snippet -- --out ./feudalwars-ws-snippet.js
+```
+
+Paste the snippet in DevTools Console before the target code creates the WebSocket. By default it watches:
+
+```text
+wss://eu1.feudalwars.net
+```
+
+Use the app/game normally, then run this in the same console:
+
+```js
+__wsCapture.download()
+```
+
+That downloads `feudalwars-ws-capture.json`. Analyze it with:
+
+```bash
+npm run ws:analyze -- --input ~/Downloads/feudalwars-ws-capture.json
+```
+
+The analyzer writes `websocket-report.md` next to the capture and groups frames into likely commands by JSON fields, array command IDs, text prefixes, or binary first bytes.
+
 ## What This Is Good For
 
 - Mapping which endpoints a webapp calls during specific workflows.
 - Finding request headers, payload shapes, query params, response shapes, status codes, and timing.
 - Separating real app API calls from scripts, images, fonts, videos, preflights, and other browser noise.
+- Capturing and grouping WebSocket frames for command/protocol analysis.
 - Building a first-pass API inventory before writing deeper probes or clients.
 
 ## Important Notes

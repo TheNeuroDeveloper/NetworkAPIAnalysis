@@ -9,7 +9,9 @@
   "scripts": {
     "capture": "node ./src/cli.js capture",
     "summarize": "node ./src/cli.js summarize",
-    "lint": "node --check ./src/cli.js && node --check ./src/cdp.js && node --check ./src/report.js"
+    "ws:snippet": "node ./src/cli.js ws-snippet",
+    "ws:analyze": "node ./src/cli.js ws-analyze",
+    "lint": "node --check ./src/cli.js && node --check ./src/cdp.js && node --check ./src/report.js && node --check ./src/websocket.js"
   },
   "engines": {
     "node": ">=22"

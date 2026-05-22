@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { CdpClient, getBrowserWebSocketUrl } from "./cdp.js";
 import { readCapture, writeApiReport, writeReport } from "./report.js";
+import { readWebSocketCapture, renderWebSocketSnippet, writeWebSocketReport, writeWebSocketSnippet } from "./websocket.js";
 
 const DEFAULT_BODY_LIMIT = 200_000;
 
@@ -21,6 +22,8 @@ async function main() {
 
   if (command === "capture") return capture(args);
   if (command === "summarize") return summarize(args);
+  if (command === "ws-snippet") return webSocketSnippet(args);
+  if (command === "ws-analyze") return webSocketAnalyze(args);
   return help();
 }
 
@@ -152,6 +155,26 @@ async function summarize(args) {
   await writeApiReport(apiOut, records);
   console.log(`Wrote ${out}`);
   console.log(`Wrote ${apiOut}`);
+}
+
+async function webSocketSnippet(args) {
+  const target = args.target ?? "wss://eu1.feudalwars.net";
+  if (args.out) {
+    const out = path.resolve(args.out);
+    await writeWebSocketSnippet(out, target);
+    console.log(`Wrote ${out}`);
+    return;
+  }
+  console.log(renderWebSocketSnippet(target));
+}
+
+async function webSocketAnalyze(args) {
+  if (!args.input) throw new Error("Missing --input");
+  const input = path.resolve(args.input);
+  const out = path.resolve(args.out ?? path.join(path.dirname(input), "websocket-report.md"));
+  const capture = await readWebSocketCapture(input);
+  await writeWebSocketReport(out, capture);
+  console.log(`Wrote ${out}`);
 }
 
 function handleNetworkEvent(message, records, options) {
@@ -330,5 +353,7 @@ function help() {
   console.log(`Usage:
   npm run capture -- --url https://example.com --duration 60
   npm run summarize -- --input ./captures/<run>/capture.jsonl
+  npm run ws:snippet -- --out ./feudalwars-ws-snippet.js
+  npm run ws:analyze -- --input ./feudalwars-ws-capture.json
 `);
 }

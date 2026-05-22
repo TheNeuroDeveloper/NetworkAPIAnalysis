@@ -1,0 +1,73 @@
+{
+  "target": "wss://eu1.feudalwars.net",
+  "startedAt": "2026-05-22T00:00:00.000Z",
+  "exportedAt": "2026-05-22T00:01:00.000Z",
+  "location": "https://example.test/game",
+  "sockets": [
+    {
+      "id": 1,
+      "url": "wss://eu1.feudalwars.net/socket",
+      "createdAt": "2026-05-22T00:00:01.000Z"
+    }
+  ],
+  "frames": [
+    {
+      "index": 0,
+      "timestamp": "2026-05-22T00:00:01.100Z",
+      "direction": "meta",
+      "socketId": 1,
+      "url": "wss://eu1.feudalwars.net/socket",
+      "event": "open"
+    },
+    {
+      "index": 1,
+      "timestamp": "2026-05-22T00:00:02.000Z",
+      "direction": "out",
+      "socketId": 1,
+      "url": "wss://eu1.feudalwars.net/socket",
+      "payloadKind": "json",
+      "byteLength": 47,
+      "text": "{\"cmd\":\"join\",\"room\":\"alpha\",\"token\":\"sample\"}",
+      "data": {
+        "cmd": "join",
+        "room": "alpha",
+        "token": "sample"
+      }
+    },
+    {
+      "index": 2,
+      "timestamp": "2026-05-22T00:00:02.100Z",
+      "direction": "in",
+      "socketId": 1,
+      "url": "wss://eu1.feudalwars.net/socket",
+      "payloadKind": "json",
+      "byteLength": 35,
+      "text": "[\"state\",{\"gold\":10,\"wood\":20}]",
+      "data": [
+        "state",
+        {
+          "gold": 10,
+          "wood": 20
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "timestamp": "2026-05-22T00:00:03.000Z",
+      "direction": "in",
+      "socketId": 1,
+      "url": "wss://eu1.feudalwars.net/socket",
+      "payloadKind": "binary",
+      "byteLength": 4,
+      "data": {
+        "byteLength": 4,
+        "hexPreview": "01 02 03 04",
+        "bytesPreview": [1, 2, 3, 4]
+      },
+      "binary": {
+        "byteLength": 4,
+        "hexPreview": "01 02 03 04"
+      }
+    }
+  ]
+}

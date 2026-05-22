@@ -75,6 +75,17 @@ npm run ws:analyze -- --input ~/Downloads/feudalwars-ws-capture.json
 
 The analyzer writes `websocket-report.md` next to the capture and groups frames into likely commands by JSON fields, array command IDs, text prefixes, or binary first bytes.
 
+If the WebSocket opens immediately on page load, launch the page through the DevTools Protocol recorder instead. It enables Network capture before navigation, so the initial handshake and first frames are included:
+
+```bash
+npm run ws:capture -- \
+  --url https://game.example.test \
+  --target "wss://eu1.feudalwars.net/?client=v2&protocolVersion=2&engine=phaser3&playerName=BrewBear&loggedIn=true&loadDom=true&isPing=false&roomFeed=false&supportsRunningGameRejoin=true&supportsV2MoveEcho=true&sessionID=null" \
+  --duration 60
+```
+
+Use `--duration 0` to record until you press `Ctrl+C`. The command writes `websocket-capture.json` and `websocket-report.md` into `./captures/<timestamp>/`.
+
 ## What This Is Good For
 
 - Mapping which endpoints a webapp calls during specific workflows.

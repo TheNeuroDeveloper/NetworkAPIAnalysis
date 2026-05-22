@@ -7,7 +7,15 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { CdpClient, getBrowserWebSocketUrl } from "./cdp.js";
 import { readCapture, writeApiReport, writeReport } from "./report.js";
-import { readWebSocketCapture, renderWebSocketSnippet, writeWebSocketReport, writeWebSocketSnippet } from "./websocket.js";
+import {
+  createWebSocketCapture,
+  handleCdpWebSocketEvent,
+  readWebSocketCapture,
+  renderWebSocketSnippet,
+  writeWebSocketCapture,
+  writeWebSocketReport,
+  writeWebSocketSnippet
+} from "./websocket.js";
 
 const DEFAULT_BODY_LIMIT = 200_000;
 
@@ -23,6 +31,7 @@ async function main() {
   if (command === "capture") return capture(args);
   if (command === "summarize") return summarize(args);
   if (command === "ws-snippet") return webSocketSnippet(args);
+  if (command === "ws-capture") return webSocketCapture(args);
   if (command === "ws-analyze") return webSocketAnalyze(args);
   return help();
 }
@@ -175,6 +184,98 @@ async function webSocketAnalyze(args) {
   const capture = await readWebSocketCapture(input);
   await writeWebSocketReport(out, capture);
   console.log(`Wrote ${out}`);
+}
+
+async function webSocketCapture(args) {
+  if (!args.url) throw new Error("Missing --url for the game page");
+
+  const target = args.target ?? "wss://eu1.feudalwars.net";
+  const port = Number(args.port ?? 9222);
+  const duration = Number(args.duration ?? 60);
+  const outDir = path.resolve(args.out ?? path.join("captures", safeStamp(new Date())));
+  const profileDir = args["profile-dir"]
+    ? path.resolve(args["profile-dir"])
+    : await fs.mkdtemp(path.join(os.tmpdir(), "network-tab-profile-"));
+  const captureFile = path.join(outDir, "websocket-capture.json");
+  const reportFile = path.join(outDir, "websocket-report.md");
+  const captureState = createWebSocketCapture({ target, pageUrl: args.url });
+
+  await fs.mkdir(outDir, { recursive: true });
+
+  const chrome = launchChrome({
+    executable: args.chrome,
+    port,
+    profileDir,
+    url: "about:blank"
+  });
+
+  let client;
+  let targetId;
+  let finalized = false;
+
+  const finalize = async () => {
+    if (finalized) return;
+    finalized = true;
+    await writeWebSocketCapture(captureFile, captureState);
+    await writeWebSocketReport(reportFile, captureState);
+    console.log(`Wrote ${captureState.frames.length} WebSocket events`);
+    console.log(`Capture: ${captureFile}`);
+    console.log(`Report: ${reportFile}`);
+  };
+
+  const cleanup = async () => {
+    if (client && targetId) {
+      await client.send("Target.closeTarget", { targetId }).catch(() => {});
+    }
+    client?.close();
+    chrome.kill("SIGTERM");
+    if (!args["keep-profile"] && !args["profile-dir"]) {
+      await fs.rm(profileDir, { recursive: true, force: true }).catch(() => {});
+    }
+  };
+
+  process.once("SIGINT", async () => {
+    console.log("\nStopping WebSocket capture...");
+    await finalize();
+    await cleanup();
+    process.exit(0);
+  });
+
+  try {
+    const wsUrl = await getBrowserWebSocketUrl(port);
+    client = new CdpClient(wsUrl);
+    await client.connect();
+
+    const targetInfo = await client.send("Target.createTarget", { url: "about:blank" });
+    targetId = targetInfo.targetId;
+    const attached = await client.send("Target.attachToTarget", { targetId, flatten: true });
+    const sessionId = attached.sessionId;
+
+    client.onEvent((message) => {
+      if (message.sessionId !== sessionId) return;
+      handleCdpWebSocketEvent(captureState, message);
+    });
+
+    await client.send("Page.enable", {}, sessionId);
+    await client.send("Network.enable", {}, sessionId);
+    await client.send("Network.setCacheDisabled", { cacheDisabled: true }, sessionId);
+    await client.send("Page.navigate", { url: args.url }, sessionId);
+
+    console.log(`Capturing WebSockets from ${args.url}`);
+    console.log(`Target: ${target}`);
+    console.log(`Output: ${outDir}`);
+    console.log(duration === 0 ? "Press Ctrl+C to stop." : `Recording for ${duration} seconds...`);
+
+    if (duration === 0) {
+      await once(process, "never");
+    } else {
+      await new Promise((resolve) => setTimeout(resolve, duration * 1000));
+    }
+
+    await finalize();
+  } finally {
+    await cleanup();
+  }
 }
 
 function handleNetworkEvent(message, records, options) {
@@ -354,6 +455,7 @@ function help() {
   npm run capture -- --url https://example.com --duration 60
   npm run summarize -- --input ./captures/<run>/capture.jsonl
   npm run ws:snippet -- --out ./feudalwars-ws-snippet.js
+  npm run ws:capture -- --url https://game.example.test --target wss://eu1.feudalwars.net --duration 60
   npm run ws:analyze -- --input ./feudalwars-ws-capture.json
 `);
 }

@@ -1,2 +1,5 @@
 captures/
 *.log
+*-ws-capture.json
+websocket-capture.json
+websocket-report.md

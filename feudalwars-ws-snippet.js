@@ -1,5 +1,5 @@
 (() => {
-  const target = "wss://eu1.feudalwars.net";
+  const target = "wss://eu1.feudalwars.net/?client=v2&protocolVersion=2&engine=phaser3&playerName=BrewBear&loggedIn=true&loadDom=true&isPing=false&roomFeed=false&supportsRunningGameRejoin=true&supportsV2MoveEcho=true&sessionID=null";
   const NativeWebSocket = window.WebSocket;
   const sockets = [];
   const frames = [];

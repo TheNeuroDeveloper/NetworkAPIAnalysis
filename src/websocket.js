@@ -196,6 +196,81 @@ export async function writeWebSocketReport(file, capture) {
   await fs.writeFile(file, renderWebSocketReport(capture), "utf8");
 }
 
+export function createWebSocketCapture({ target = DEFAULT_TARGET, pageUrl = undefined } = {}) {
+  return {
+    target,
+    startedAt: new Date().toISOString(),
+    exportedAt: undefined,
+    location: pageUrl,
+    sockets: [],
+    frames: []
+  };
+}
+
+export function handleCdpWebSocketEvent(capture, message) {
+  const { method, params } = message;
+  if (!params?.requestId) return;
+
+  if (method === "Network.webSocketCreated") {
+    if (!String(params.url).startsWith(capture.target)) return;
+    capture.sockets.push({
+      id: params.requestId,
+      requestId: params.requestId,
+      url: params.url,
+      createdAt: nowIso(),
+      initiator: params.initiator
+    });
+    capture.frames.push(metaFrame(capture, params.requestId, "created", { url: params.url }));
+    return;
+  }
+
+  const socket = capture.sockets.find((item) => item.requestId === params.requestId);
+  if (!socket) return;
+
+  if (method === "Network.webSocketWillSendHandshakeRequest") {
+    socket.requestHeaders = params.request?.headers;
+    capture.frames.push(metaFrame(capture, params.requestId, "handshake-request", {
+      headers: params.request?.headers
+    }));
+    return;
+  }
+
+  if (method === "Network.webSocketHandshakeResponseReceived") {
+    socket.status = params.response?.status;
+    socket.statusText = params.response?.statusText;
+    socket.responseHeaders = params.response?.headers;
+    capture.frames.push(metaFrame(capture, params.requestId, "handshake-response", {
+      status: params.response?.status,
+      statusText: params.response?.statusText,
+      headers: params.response?.headers
+    }));
+    return;
+  }
+
+  if (method === "Network.webSocketFrameSent" || method === "Network.webSocketFrameReceived") {
+    const direction = method === "Network.webSocketFrameSent" ? "out" : "in";
+    capture.frames.push(cdpMessageFrame(capture, socket, direction, params.response));
+    return;
+  }
+
+  if (method === "Network.webSocketFrameError") {
+    capture.frames.push(metaFrame(capture, params.requestId, "frame-error", {
+      errorMessage: params.errorMessage
+    }));
+    return;
+  }
+
+  if (method === "Network.webSocketClosed") {
+    socket.closedAt = nowIso();
+    capture.frames.push(metaFrame(capture, params.requestId, "closed"));
+  }
+}
+
+export async function writeWebSocketCapture(file, capture) {
+  capture.exportedAt = new Date().toISOString();
+  await fs.writeFile(file, JSON.stringify(capture, null, 2), "utf8");
+}
+
 export function renderWebSocketReport(capture) {
   const frames = capture.frames ?? [];
   const messageFrames = frames.filter((frame) => frame.direction === "in" || frame.direction === "out");
@@ -276,6 +351,95 @@ function groupFrames(frames) {
   return [...groups.entries()]
     .map(([key, groupedFrames]) => ({ key, frames: groupedFrames }))
     .sort((a, b) => b.frames.length - a.frames.length || a.key.localeCompare(b.key));
+}
+
+function cdpMessageFrame(capture, socket, direction, frame) {
+  const decoded = decodeCdpFrame(frame);
+  return {
+    index: capture.frames.length,
+    timestamp: nowIso(),
+    direction,
+    socketId: socket.id,
+    requestId: socket.requestId,
+    url: socket.url,
+    payloadKind: decoded.kind,
+    opcode: frame?.opcode,
+    mask: frame?.mask,
+    byteLength: decoded.byteLength,
+    text: decoded.text,
+    data: decoded.value,
+    binary: decoded.binary
+  };
+}
+
+function decodeCdpFrame(frame = {}) {
+  const payload = frame.payloadData ?? "";
+  if (frame.opcode === 2) {
+    const bytes = decodeBase64(payload);
+    if (bytes) {
+      return {
+        kind: "binary",
+        byteLength: bytes.length,
+        value: {
+          byteLength: bytes.length,
+          hexPreview: toHex(bytes, 160),
+          bytesPreview: Array.from(bytes.slice(0, 160))
+        },
+        binary: {
+          byteLength: bytes.length,
+          hexPreview: toHex(bytes, 160)
+        }
+      };
+    }
+  }
+
+  try {
+    return {
+      kind: "json",
+      byteLength: payload.length,
+      text: payload,
+      value: JSON.parse(payload)
+    };
+  } catch {
+    return {
+      kind: "text",
+      byteLength: payload.length,
+      text: payload,
+      value: payload
+    };
+  }
+}
+
+function decodeBase64(value) {
+  try {
+    return Buffer.from(value, "base64");
+  } catch {
+    return undefined;
+  }
+}
+
+function metaFrame(capture, requestId, event, extra = {}) {
+  const socket = capture.sockets.find((item) => item.requestId === requestId);
+  return {
+    index: capture.frames.length,
+    timestamp: nowIso(),
+    direction: "meta",
+    socketId: socket?.id ?? requestId,
+    requestId,
+    url: socket?.url ?? extra.url,
+    event,
+    ...extra
+  };
+}
+
+function toHex(bytes, limit = 96) {
+  return Array.from(bytes.slice(0, limit))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join(" ");
+}
+
+function nowIso() {
+  return new Date().toISOString();
 }
 
 function frameCommand(frame) {

@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import zlib from "node:zlib";
 
 const DEFAULT_TARGET = "wss://eu1.feudalwars.net";
 
@@ -272,7 +273,7 @@ export async function writeWebSocketCapture(file, capture) {
 }
 
 export function renderWebSocketReport(capture) {
-  const frames = capture.frames ?? [];
+  const frames = (capture.frames ?? []).map(normalizeWebSocketFrame);
   const messageFrames = frames.filter((frame) => frame.direction === "in" || frame.direction === "out");
   const groups = groupFrames(messageFrames);
   const lines = [
@@ -390,6 +391,18 @@ function decodeCdpFrame(frame = {}) {
   if (frame.opcode === 2) {
     const bytes = decodeBase64(payload);
     if (bytes) {
+      const inflated = inflatePayload(bytes);
+      if (inflated) {
+        return {
+          ...inflated,
+          byteLength: bytes.length,
+          binary: {
+            byteLength: bytes.length,
+            base64: payload,
+            hexPreview: toHex(bytes, 160)
+          }
+        };
+      }
       return {
         kind: "binary",
         byteLength: bytes.length,
@@ -400,6 +413,7 @@ function decodeCdpFrame(frame = {}) {
         },
         binary: {
           byteLength: bytes.length,
+          base64: payload,
           hexPreview: toHex(bytes, 160)
         }
       };
@@ -421,6 +435,60 @@ function decodeCdpFrame(frame = {}) {
       value: payload
     };
   }
+}
+
+function normalizeWebSocketFrame(frame) {
+  if (frame.direction !== "in" && frame.direction !== "out") return frame;
+  if (frame.payloadKind !== "binary") return frame;
+
+  const bytes = frame.binary?.base64
+    ? decodeBase64(frame.binary.base64)
+    : fullPreviewBytes(frame);
+  if (!bytes) return frame;
+
+  const inflated = inflatePayload(bytes);
+  if (!inflated) return frame;
+
+  return {
+    ...frame,
+    payloadKind: inflated.kind,
+    text: inflated.text,
+    data: inflated.value,
+    compressed: {
+      kind: "zlib",
+      byteLength: bytes.length,
+      hexPreview: toHex(bytes, 160),
+      truncated: !frame.binary?.base64 && frame.data?.bytesPreview?.length < frame.byteLength
+    }
+  };
+}
+
+function inflatePayload(bytes) {
+  if (bytes.length < 2 || bytes[0] !== 0x78) return undefined;
+  try {
+    const text = zlib.inflateSync(Buffer.from(bytes)).toString("utf8");
+    try {
+      return {
+        kind: "zlib-json",
+        text,
+        value: JSON.parse(text)
+      };
+    } catch {
+      return {
+        kind: "zlib-text",
+        text,
+        value: text
+      };
+    }
+  } catch {
+    return undefined;
+  }
+}
+
+function fullPreviewBytes(frame) {
+  const preview = frame.data?.bytesPreview;
+  if (!preview || preview.length < frame.byteLength) return undefined;
+  return Buffer.from(preview);
 }
 
 function decodeBase64(value) {
@@ -463,7 +531,7 @@ function frameCommand(frame) {
     return "binary";
   }
   if (data && typeof data === "object" && !Array.isArray(data)) {
-    for (const key of ["command", "cmd", "type", "event", "action", "op", "opcode", "route", "name", "method"]) {
+    for (const key of ["n", "command", "cmd", "type", "event", "action", "op", "opcode", "route", "name", "method"]) {
       if (data[key] !== undefined) return `${key}:${String(data[key])}`;
     }
     const keys = Object.keys(data);
